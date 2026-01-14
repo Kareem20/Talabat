@@ -11,10 +11,12 @@ namespace Talabat.APIs.Controllers
     public class PaymentController : APIBaseController
     {
         private readonly IPaymentService _paymentService;
+        private readonly IConfiguration _configuration;
 
-        public PaymentController(IPaymentService paymentService)
+        public PaymentController(IPaymentService paymentService,IConfiguration configuration)
         {
             _paymentService = paymentService;
+            _configuration = configuration;
         }
         [Authorize] 
         [HttpPost]
@@ -37,7 +39,7 @@ namespace Talabat.APIs.Controllers
                 var stripeEvent = EventUtility.ConstructEvent(
                     json,
                     Request.Headers["Stripe-Signature"],
-                    "whsec_9a7b265b1fc196d9c33e3bb174fe53075e9f71299af9ce384f4c26bc96afa39f");
+                    _configuration["Stripe:WebhookKey"]);
                 var paymentIntent = stripeEvent.Data.Object as PaymentIntent;
                 if (stripeEvent.Type == EventTypes.PaymentIntentPaymentFailed)
                 {
