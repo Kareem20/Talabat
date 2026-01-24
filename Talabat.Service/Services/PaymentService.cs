@@ -11,15 +11,12 @@ namespace Talabat.Service.Services
 {
     public class PaymentService : IPaymentService
     {
-        private readonly IConfiguration _configuration;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IPaymentIdempotancyRespository _paymentIdempotancyRespository;
 
-        public PaymentService(IConfiguration configuration
-            , IUnitOfWork unitOfWork
+        public PaymentService(IUnitOfWork unitOfWork
             , IPaymentIdempotancyRespository paymentIdempotancyRespository)
         {
-            _configuration = configuration;
             _unitOfWork = unitOfWork;
             _paymentIdempotancyRespository = paymentIdempotancyRespository;
         }
@@ -28,48 +25,62 @@ namespace Talabat.Service.Services
             var cashedResponse = await _paymentIdempotancyRespository.GetAsync(idempotencyKey);
             if (cashedResponse is not null)
                 return cashedResponse;
-            var specification = new OrderByIdSpecification(orderId);
-            var Order = await _unitOfWork.Repository<Order>().GetByIdWithSpecificationAsync(specification);
-            if (Order is null)
-                return null;
-            // if (Order.Status == OrderStatus.PaymentReceived) // TODO: Exception to be handled
-            var stripeService = new PaymentIntentService();
-            var amount = (long)Order.TotalCost() * 100;
-            var clientSecret = string.Empty;
-            if (string.IsNullOrEmpty(Order.PaymentIntentId))
+            var lockAcquired = await _paymentIdempotancyRespository
+                .TryAcquireLockAsync(idempotencyKey, TimeSpan.FromSeconds(30));
+            if (!lockAcquired)
+                throw new Exception("Payment is already being processed");
+            try
             {
-                var intent = await stripeService.CreateAsync(new PaymentIntentCreateOptions
+                cashedResponse = await _paymentIdempotancyRespository.GetAsync(idempotencyKey); // double check
+                if (cashedResponse is not null)
+                    return cashedResponse;
+                var specification = new OrderByIdSpecification(orderId);
+                var Order = await _unitOfWork.Repository<Order>().GetByIdWithSpecificationAsync(specification);
+                if (Order is null)
+                    return null;
+                // if (Order.Status == OrderStatus.PaymentReceived) // TODO: Exception to be handled
+                var stripeService = new PaymentIntentService();
+                var amount = (long)Order.TotalCost() * 100;
+                var clientSecret = string.Empty;
+                if (string.IsNullOrEmpty(Order.PaymentIntentId))
                 {
-                    Amount = amount,
-                    Currency = "usd",
-                    PaymentMethodTypes = new List<string> { "card" },
-                }, new RequestOptions
+                    var intent = await stripeService.CreateAsync(new PaymentIntentCreateOptions
+                    {
+                        Amount = amount,
+                        Currency = "usd",
+                        PaymentMethodTypes = new List<string> { "card" },
+                    }, new RequestOptions
+                    {
+                        IdempotencyKey = idempotencyKey
+                    });
+                    Order.PaymentIntentId = intent.Id;
+                    clientSecret = intent.ClientSecret;
+                }
+                else
                 {
-                    IdempotencyKey = idempotencyKey
-                });
-                Order.PaymentIntentId = intent.Id;
-                clientSecret = intent.ClientSecret;
-            }
-            else
-            {
-                var intent = await stripeService.UpdateAsync(Order.PaymentIntentId, new PaymentIntentUpdateOptions
-                {
-                    Amount = amount,
-                }, new RequestOptions
-                {
-                    IdempotencyKey = idempotencyKey
-                });
-                clientSecret = intent.ClientSecret;
+                    var intent = await stripeService.UpdateAsync(Order.PaymentIntentId, new PaymentIntentUpdateOptions
+                    {
+                        Amount = amount,
+                    }, new RequestOptions
+                    {
+                        IdempotencyKey = idempotencyKey
+                    });
+                    clientSecret = intent.ClientSecret;
 
-            }
-            await _unitOfWork.CompleteAsync();
-            var response = new PaymentIntentResponse()
+                }
+                await _unitOfWork.CompleteAsync();
+                var response = new PaymentIntentResponse()
+                {
+                    OrderId = Order.Id,
+                    ClientSecret = clientSecret
+                };
+                await _paymentIdempotancyRespository.SetAsync(idempotencyKey, response);
+                return response;
+            }   
+            finally
             {
-                OrderId = Order.Id,
-                ClientSecret = clientSecret
-            };
-            await _paymentIdempotancyRespository.SetAsync(idempotencyKey, response);
-            return response;
+                await _paymentIdempotancyRespository.ReleaseLockAsync(idempotencyKey);
+            }
         }
 
         public async Task<Order> UpdatePaymentIntentToSucceededOrFailed(string PaymentIntentId, bool IsSuccessed)
