@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Stripe;
 using System.Net;
 using Talabat.APIs.Errors;
-using Talabat.Service.DTOs;
+using Talabat.Core.Models;
 using Talabat.Service.Interfaces;
 
 namespace Talabat.APIs.Controllers
@@ -13,18 +13,21 @@ namespace Talabat.APIs.Controllers
         private readonly IPaymentService _paymentService;
         private readonly IConfiguration _configuration;
 
-        public PaymentController(IPaymentService paymentService,IConfiguration configuration)
+        public PaymentController(IPaymentService paymentService, IConfiguration configuration)
         {
             _paymentService = paymentService;
             _configuration = configuration;
         }
-        [Authorize] 
+        [Authorize]
         [HttpPost]
         [ProducesResponseType(typeof(PaymentIntentResponse), (int)HttpStatusCode.OK)]
         [ProducesResponseType(typeof(ApiError), (int)HttpStatusCode.BadRequest)]
         public async Task<ActionResult<PaymentIntentResponse>> CreateOrUpdatePaymentIntent(int OrderId)
         {
-            var intent = await _paymentService.CreateOrUpdatePaymentIntent(OrderId);
+            var idempotencyKey = Request.Headers["Idempotency-Key"].FirstOrDefault();
+            if (string.IsNullOrEmpty(idempotencyKey))
+                return BadRequest(new ApiError((int)HttpStatusCode.BadRequest, "Idempotency-Key header is required"));
+            var intent = await _paymentService.CreateOrUpdatePaymentIntent(OrderId, idempotencyKey);
             if (intent == null)
                 return BadRequest(new ApiError((int)HttpStatusCode.BadRequest, "Problem in creating Payment with this order"));
             return Ok(intent);
@@ -57,9 +60,8 @@ namespace Talabat.APIs.Controllers
             return Ok();
         }
         // to test confirming payment intent
-        [Authorize]
         [HttpPost("confirm")]
-        public IActionResult ConfirmPayment([FromBody] string paymentIntentId)
+        public async Task<IActionResult> ConfirmPaymentAsync([FromBody] string paymentIntentId)
         {
             var paymentMethodService = new PaymentMethodService();
             var paymentMethod = paymentMethodService.Create(new PaymentMethodCreateOptions
@@ -82,7 +84,6 @@ namespace Talabat.APIs.Controllers
                 intent.Id,
                 intent.Status
             });
-
         }
     }
 }

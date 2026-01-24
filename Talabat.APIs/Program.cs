@@ -21,6 +21,7 @@ namespace Talabat.APIs
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
+            Stripe.StripeConfiguration.ApiKey = builder.Configuration["StripeSettings:SecretKey"];
             builder.Services.AddDbContext<ProductContext>(options =>
             {
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));

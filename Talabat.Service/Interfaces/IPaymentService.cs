@@ -1,11 +1,11 @@
-﻿using Talabat.Core.Models.OrderValues;
-using Talabat.Service.DTOs;
+﻿using Talabat.Core.Models;
+using Talabat.Core.Models.OrderValues;
 
 namespace Talabat.Service.Interfaces
 {
     public interface IPaymentService
     {
-        Task<PaymentIntentResponse?> CreateOrUpdatePaymentIntent(int OrderID);
-        Task<Order> UpdatePaymentIntentToSucceededOrFailed(string PaymentIntentId, bool IsSuccessed);
+        Task<PaymentIntentResponse?> CreateOrUpdatePaymentIntent(int orderId, string idempotencyKey);
+        Task<Order> UpdatePaymentIntentToSucceededOrFailed(string paymentIntentId, bool isSuccessed);
     }
 }

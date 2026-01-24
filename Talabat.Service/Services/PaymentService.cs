@@ -1,9 +1,10 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Stripe;
 using Talabat.Core;
+using Talabat.Core.Models;
 using Talabat.Core.Models.OrderValues;
+using Talabat.Core.Repositories;
 using Talabat.Core.Specifications.OrderSpecifications;
-using Talabat.Service.DTOs;
 using Talabat.Service.Interfaces;
 
 namespace Talabat.Service.Services
@@ -12,17 +13,22 @@ namespace Talabat.Service.Services
     {
         private readonly IConfiguration _configuration;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IPaymentIdempotancyRespository _paymentIdempotancyRespository;
 
         public PaymentService(IConfiguration configuration
-            , IUnitOfWork unitOfWork)
+            , IUnitOfWork unitOfWork
+            , IPaymentIdempotancyRespository paymentIdempotancyRespository)
         {
             _configuration = configuration;
             _unitOfWork = unitOfWork;
+            _paymentIdempotancyRespository = paymentIdempotancyRespository;
         }
-        public async Task<PaymentIntentResponse?> CreateOrUpdatePaymentIntent(int OrderId)
+        public async Task<PaymentIntentResponse?> CreateOrUpdatePaymentIntent(int orderId, string idempotencyKey)
         {
-            StripeConfiguration.ApiKey = _configuration["StripeSettings:SecretKey"];
-            var specification = new OrderByIdSpecification(OrderId);
+            var cashedResponse = await _paymentIdempotancyRespository.GetAsync(idempotencyKey);
+            if (cashedResponse is not null)
+                return cashedResponse;
+            var specification = new OrderByIdSpecification(orderId);
             var Order = await _unitOfWork.Repository<Order>().GetByIdWithSpecificationAsync(specification);
             if (Order is null)
                 return null;
@@ -37,6 +43,9 @@ namespace Talabat.Service.Services
                     Amount = amount,
                     Currency = "usd",
                     PaymentMethodTypes = new List<string> { "card" },
+                }, new RequestOptions
+                {
+                    IdempotencyKey = idempotencyKey
                 });
                 Order.PaymentIntentId = intent.Id;
                 clientSecret = intent.ClientSecret;
@@ -46,16 +55,21 @@ namespace Talabat.Service.Services
                 var intent = await stripeService.UpdateAsync(Order.PaymentIntentId, new PaymentIntentUpdateOptions
                 {
                     Amount = amount,
+                }, new RequestOptions
+                {
+                    IdempotencyKey = idempotencyKey
                 });
                 clientSecret = intent.ClientSecret;
 
             }
             await _unitOfWork.CompleteAsync();
-            return new PaymentIntentResponse()
+            var response = new PaymentIntentResponse()
             {
                 OrderId = Order.Id,
                 ClientSecret = clientSecret
             };
+            await _paymentIdempotancyRespository.SetAsync(idempotencyKey, response);
+            return response;
         }
 
         public async Task<Order> UpdatePaymentIntentToSucceededOrFailed(string PaymentIntentId, bool IsSuccessed)

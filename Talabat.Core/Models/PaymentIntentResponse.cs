@@ -1,4 +1,4 @@
-﻿namespace Talabat.Service.DTOs
+﻿namespace Talabat.Core.Models
 {
     public class PaymentIntentResponse
     {
