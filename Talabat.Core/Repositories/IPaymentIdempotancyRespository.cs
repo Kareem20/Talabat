@@ -6,5 +6,7 @@ namespace Talabat.Core.Repositories
     {
         Task<PaymentIntentResponse> GetAsync(string key);
         Task SetAsync(string key, PaymentIntentResponse intent);
+        Task<bool> TryAcquireLockAsync(string key, TimeSpan timeout);
+        Task ReleaseLockAsync(string key);
     }
 }

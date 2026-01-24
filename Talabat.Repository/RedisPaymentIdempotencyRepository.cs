@@ -18,7 +18,6 @@ namespace Talabat.Repository
             if (data.IsNullOrEmpty) return null;
             return JsonSerializer.Deserialize<PaymentIntentResponse>(data!);
         }
-
         public async Task SetAsync(string key, PaymentIntentResponse response)
         {
             var json = JsonSerializer.Serialize(response);
@@ -29,5 +28,19 @@ namespace Talabat.Repository
                 TimeSpan.FromHours(24)
             );
         }
+        public async Task<bool> TryAcquireLockAsync(string key, TimeSpan timeout)
+        {
+            return await _database.StringSetAsync(
+                $"payment:idempotency:lock:{key}",
+                "locked",
+                timeout,
+                When.NotExists
+            );
+        }
+        public Task ReleaseLockAsync(string key)
+        {
+            return _database.KeyDeleteAsync($"payment:idempotency:lock:{key}");
+        }
+
     }
 }
