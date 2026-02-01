@@ -59,6 +59,22 @@ API, business logic, and data access are isolated
 
 ### Framework Independence
 ------------------------------------------------------------------------
+
+## 🛠 Technologies & Tools
+
+| Technology            | Purpose             |
+| --------------------- | ------------------- |
+| ASP.NET Core          | Web API             |
+| Entity Framework Core | ORM                 |
+| SQL Server            | Relational database |
+| Redis                 | Distributed caching |
+| JWT                   | Authentication      |
+| Stripe                | Payments            |
+| Swagger / OpenAPI     | API documentation   |
+| AutoMapper            | Object mapping      |
+
+---------------------------------------------------------------------------
+
 ## Core Features
 ### 🔐 Authentication & Authorization
 
@@ -164,21 +180,45 @@ services.AddStackExchangeRedisCache(options =>
 -  Stateless API design
 
 ------------------------------------------------------------------------
-## 🛠 Technologies & Tools
 
-| Technology            | Purpose             |
-| --------------------- | ------------------- |
-| ASP.NET Core          | Web API             |
-| Entity Framework Core | ORM                 |
-| SQL Server            | Relational database |
-| Redis                 | Distributed caching |
-| JWT                   | Authentication      |
-| Stripe                | Payments            |
-| Swagger / OpenAPI     | API documentation   |
-| AutoMapper            | Object mapping      |
+## 💳 Payment Idempotency & Concurrency Handling
 
+Payment processing is designed to be safe under retries and concurrent
+requests.
 
----------------------------------------------------------------------------
+While Stripe provides idempotency at the API level, this alone does not
+protect the server from race conditions, duplicate workflows, or
+concurrent execution.
+
+### Problem
+Multiple concurrent requests using the same payment intent can:
+- Trigger duplicate Stripe calls
+- Cause inconsistent order state
+- Break retry safety
+
+### Solution
+
+The API implements **server-side idempotency** using Redis:
+
+- Atomic distributed locks (`SETNX`) to prevent concurrent execution
+- Cached payment results to safely handle retries
+- Lock expiration (TTL) to prevent deadlocks
+- Double-check pattern to close race-condition windows
+
+### Execution Flow
+
+1. Check if a payment result already exists
+2. Attempt to acquire a Redis lock for the idempotency key
+3. Re-check the cached result after acquiring the lock
+4. Create Stripe PaymentIntent
+5. Cache the successful payment result
+6. Release the lock
+
+This guarantees that each payment operation is executed exactly once,
+even under concurrent requests or repeated client retries.
+
+------------------------------------------------------------------------
+
 ## ⚙ Getting Started
 
 ### 📋 Prerequisites
