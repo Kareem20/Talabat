@@ -1,6 +1,6 @@
 ﻿using StackExchange.Redis;
 using System.Text.Json;
-using Talabat.Core.Models;
+using Talabat.Core.Models.Payment;
 using Talabat.Core.Repositories;
 
 namespace Talabat.Repository
@@ -12,13 +12,13 @@ namespace Talabat.Repository
         {
             _database = redis.GetDatabase();
         }
-        public async Task<PaymentIntentResponse?> GetAsync(string key)
+        public async Task<PaymentResponse?> GetAsync(string key)
         {
             var data = _database.StringGet($"payment:idempotency:{key}");
             if (data.IsNullOrEmpty) return null;
-            return JsonSerializer.Deserialize<PaymentIntentResponse>(data!);
+            return JsonSerializer.Deserialize<PaymentResponse>(data!);
         }
-        public async Task SetAsync(string key, PaymentIntentResponse response)
+        public async Task SetAsync(string key, PaymentResponse response)
         {
             var json = JsonSerializer.Serialize(response);
 

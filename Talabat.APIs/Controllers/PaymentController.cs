@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Stripe;
 using System.Net;
 using Talabat.APIs.Errors;
-using Talabat.Core.Models;
+using Talabat.Core.Models.Payment;
 using Talabat.Service.Interfaces;
 
 namespace Talabat.APIs.Controllers
@@ -20,14 +20,14 @@ namespace Talabat.APIs.Controllers
         }
         [Authorize]
         [HttpPost]
-        [ProducesResponseType(typeof(PaymentIntentResponse), (int)HttpStatusCode.OK)]
+        [ProducesResponseType(typeof(PaymentResponse), (int)HttpStatusCode.OK)]
         [ProducesResponseType(typeof(ApiError), (int)HttpStatusCode.BadRequest)]
-        public async Task<ActionResult<PaymentIntentResponse>> CreateOrUpdatePaymentIntent(int OrderId)
+        public async Task<ActionResult<PaymentResponse>> CreateOrUpdatePaymentIntent(int OrderId, [FromQuery] string gateway)
         {
             var idempotencyKey = Request.Headers["Idempotency-Key"].FirstOrDefault();
             if (string.IsNullOrEmpty(idempotencyKey))
                 return BadRequest(new ApiError((int)HttpStatusCode.BadRequest, "Idempotency-Key header is required"));
-            var intent = await _paymentService.CreateOrUpdatePaymentIntent(OrderId, idempotencyKey);
+            var intent = await _paymentService.CreateOrUpdatePaymentIntent(OrderId, gateway, idempotencyKey);
             if (intent == null)
                 return BadRequest(new ApiError((int)HttpStatusCode.BadRequest, "Problem in creating Payment with this order"));
             return Ok(intent);

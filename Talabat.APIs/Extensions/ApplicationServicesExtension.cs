@@ -4,6 +4,7 @@ using Talabat.Core;
 using Talabat.Core.Repositories;
 using Talabat.Core.Services;
 using Talabat.Repository;
+using Talabat.Service.Decorators;
 using Talabat.Service.Interfaces;
 using Talabat.Service.Services;
 
@@ -35,6 +36,16 @@ namespace Talabat.APIs.Extensions
             Services.AddScoped<IOrderService, OrderService>();
             Services.AddScoped<IUnitOfWork, UnitOfWork>();
             Services.AddScoped<IPaymentService, PaymentService>();
+            Services.AddScoped<IStripeService, StripeService>();
+            // Register concrete implementation
+            Services.AddScoped<StripePaymentStrategy>();
+            // Register decorated IPaymentStrategy
+            Services.AddScoped<IPaymentStrategy>(sp =>
+            {
+                var stripeStrategy = sp.GetRequiredService<StripePaymentStrategy>();
+                var paymentIdempotancyRespository = sp.GetRequiredService<IPaymentIdempotancyRespository>();
+                return new IdempotentPaymentStrategyDecorator(stripeStrategy, paymentIdempotancyRespository);
+            });
             return Services;
         }
     }

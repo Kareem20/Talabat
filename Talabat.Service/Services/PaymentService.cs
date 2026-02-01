@@ -1,9 +1,7 @@
-﻿using Microsoft.Extensions.Configuration;
-using Stripe;
-using Talabat.Core;
-using Talabat.Core.Models;
+﻿using Talabat.Core;
 using Talabat.Core.Models.OrderValues;
-using Talabat.Core.Repositories;
+using Talabat.Core.Models.Payment;
+using Talabat.Core.Services;
 using Talabat.Core.Specifications.OrderSpecifications;
 using Talabat.Service.Interfaces;
 
@@ -12,75 +10,31 @@ namespace Talabat.Service.Services
     public class PaymentService : IPaymentService
     {
         private readonly IUnitOfWork _unitOfWork;
-        private readonly IPaymentIdempotancyRespository _paymentIdempotancyRespository;
+        private readonly IEnumerable<IPaymentStrategy> _paymentStrategy;
 
         public PaymentService(IUnitOfWork unitOfWork
-            , IPaymentIdempotancyRespository paymentIdempotancyRespository)
+            , IEnumerable<IPaymentStrategy> paymentStrategy)
         {
             _unitOfWork = unitOfWork;
-            _paymentIdempotancyRespository = paymentIdempotancyRespository;
+            _paymentStrategy = paymentStrategy;
         }
-        public async Task<PaymentIntentResponse?> CreateOrUpdatePaymentIntent(int orderId, string idempotencyKey)
+        public async Task<PaymentResponse?> CreateOrUpdatePaymentIntent(int orderId, string paymentGatewayName, string idempotencyKey)
         {
-            var cashedResponse = await _paymentIdempotancyRespository.GetAsync(idempotencyKey);
-            if (cashedResponse is not null)
-                return cashedResponse;
-            var lockAcquired = await _paymentIdempotancyRespository
-                .TryAcquireLockAsync(idempotencyKey, TimeSpan.FromSeconds(30));
-            if (!lockAcquired)
-                throw new Exception("Payment is already being processed");
-            try
+            var Order = await _unitOfWork.Repository<Order>()
+                .GetByIdWithSpecificationAsync(new OrderByIdSpecification(orderId));
+            if (Order is null)
+                return null;
+            var paymentStrategy = ResolveStrategy(paymentGatewayName);
+            var paymentResponse = await paymentStrategy
+                .ProcessPaymentAsync(Order, idempotencyKey);
+            Order.PaymentIntentId = paymentResponse.PaymentReference;
+            var response = new PaymentResponse()
             {
-                cashedResponse = await _paymentIdempotancyRespository.GetAsync(idempotencyKey); // double check
-                if (cashedResponse is not null)
-                    return cashedResponse;
-                var specification = new OrderByIdSpecification(orderId);
-                var Order = await _unitOfWork.Repository<Order>().GetByIdWithSpecificationAsync(specification);
-                if (Order is null)
-                    return null;
-                // if (Order.Status == OrderStatus.PaymentReceived) // TODO: Exception to be handled
-                var stripeService = new PaymentIntentService();
-                var amount = (long)Order.TotalCost() * 100;
-                var clientSecret = string.Empty;
-                if (string.IsNullOrEmpty(Order.PaymentIntentId))
-                {
-                    var intent = await stripeService.CreateAsync(new PaymentIntentCreateOptions
-                    {
-                        Amount = amount,
-                        Currency = "usd",
-                        PaymentMethodTypes = new List<string> { "card" },
-                    }, new RequestOptions
-                    {
-                        IdempotencyKey = idempotencyKey
-                    });
-                    Order.PaymentIntentId = intent.Id;
-                    clientSecret = intent.ClientSecret;
-                }
-                else
-                {
-                    var intent = await stripeService.UpdateAsync(Order.PaymentIntentId, new PaymentIntentUpdateOptions
-                    {
-                        Amount = amount,
-                    }, new RequestOptions
-                    {
-                        IdempotencyKey = idempotencyKey
-                    });
-                    clientSecret = intent.ClientSecret;
-
-                }
-                await _unitOfWork.CompleteAsync();
-                var response = new PaymentIntentResponse()
-                {
-                    OrderId = Order.Id,
-                    ClientSecret = clientSecret
-                };
-                await _paymentIdempotancyRespository.SetAsync(idempotencyKey, response);
-                return response;
-            }   
-            finally
-            {
-                await _paymentIdempotancyRespository.ReleaseLockAsync(idempotencyKey);
-            }
+                OrderId = Order.Id,
+                ClientSecret = paymentResponse.ClientSecret
+            };
+            await _unitOfWork.CompleteAsync();
+            return response;
         }
 
         public async Task<Order> UpdatePaymentIntentToSucceededOrFailed(string PaymentIntentId, bool IsSuccessed)
@@ -91,6 +45,13 @@ namespace Talabat.Service.Services
             _unitOfWork.Repository<Order>().Update(Order);
             await _unitOfWork.CompleteAsync();
             return Order;
+        }
+        private IPaymentStrategy ResolveStrategy(string paymentGatewayName)
+        {
+            var startegy = _paymentStrategy.FirstOrDefault(s => s.Name.Equals(paymentGatewayName, StringComparison.OrdinalIgnoreCase));
+            if (startegy is null)
+                throw new Exception($"Payment gateway '{paymentGatewayName}' is not supported");
+            return startegy;
         }
     }
 }
